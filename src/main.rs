@@ -3,9 +3,8 @@ use std::io;
 
 use clap::Parser;
 
-use peppi::model::frame::Frame;
-use peppi::model::game::Frames;
-use peppi::model::game::Player;
+use peppi::model::game::Game;
+use peppi::model::metadata::Player;
 
 #[derive(Parser)]
 struct Args {
@@ -16,11 +15,14 @@ struct Args {
     connect_code: String,
 }
 
-fn get_player_index_for_connect_code(connect_code: String, players: &Vec<Player>) -> Option<usize> {
-    for (index, player) in players.iter().enumerate() {
+fn find_player_with_connect_code<'a>(
+    connect_code: &String,
+    players: &'a Vec<Player>,
+) -> Option<&'a Player> {
+    for player in players {
         if let Some(netplay_data) = &player.netplay {
-            if netplay_data.code == connect_code {
-                return Some(index);
+            if netplay_data.code == connect_code.to_owned() {
+                return Some(player);
             }
         }
     }
@@ -28,16 +30,14 @@ fn get_player_index_for_connect_code(connect_code: String, players: &Vec<Player>
     return None;
 }
 
-fn does_game_feature_connect_code(file: String, connect_code: &String) -> bool {
-    let file = fs::File::open(file).expect("File could not be read");
+fn does_game_feature_connect_code(game: &Game, connect_code: &String) -> bool {
+    if let Some(players) = &game.metadata.players {
+        if find_player_with_connect_code(connect_code, players).is_some() {
+            return true;
+        }
+    }
 
-    let mut buffer = io::BufReader::new(file);
-    let game = peppi::game(&mut buffer, None, None).expect("File could not be parsed");
-
-    let found_player_index =
-        get_player_index_for_connect_code(connect_code.to_owned(), &game.start.players);
-
-    return found_player_index.is_some();
+    return false;
 }
 
 fn main() {
@@ -55,10 +55,16 @@ fn main() {
                 .path()
                 .into_os_string()
                 .into_string()
-                .expect("Invlaid path");
+                .expect("Invalid path");
 
-            if does_game_feature_connect_code(file_name.to_owned(), &connect_code) {
-                num_games_with_connect_code += 1;
+            let file = fs::File::open(file_name).expect("File could not be read");
+            let mut buffer = io::BufReader::new(file);
+            let game = peppi::game(&mut buffer, None, None);
+
+            if let Ok(game) = game {
+                if does_game_feature_connect_code(&game, &connect_code) {
+                    num_games_with_connect_code += 1;
+                }
             }
         }
     }
