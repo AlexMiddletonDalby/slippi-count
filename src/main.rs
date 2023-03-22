@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::time::Duration;
 
 use clap::Parser;
 
@@ -16,7 +17,7 @@ struct Args {
 }
 
 fn find_player_with_connect_code<'a>(
-    connect_code: &String,
+    connect_code: &str,
     players: &'a Vec<Player>,
 ) -> Option<&'a Player> {
     for player in players {
@@ -30,7 +31,7 @@ fn find_player_with_connect_code<'a>(
     return None;
 }
 
-fn does_game_feature_connect_code(game: &Game, connect_code: &String) -> bool {
+fn does_game_feature_connect_code(game: &Game, connect_code: &str) -> bool {
     if let Some(players) = &game.metadata.players {
         if find_player_with_connect_code(connect_code, players).is_some() {
             return true;
@@ -40,15 +41,36 @@ fn does_game_feature_connect_code(game: &Game, connect_code: &String) -> bool {
     return false;
 }
 
+fn does_game_feature_any_connect_code(game: &Game, connect_codes: &Vec<&str>) -> bool {
+    for code in connect_codes {
+        if does_game_feature_connect_code(&game, code) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+fn get_game_duration(game: &Game) -> Duration {
+    if let Some(length_in_frames) = game.metadata.duration {
+        let duration = Duration::from_secs((length_in_frames / 60) as u64);
+
+        return duration;
+    }
+
+    return Duration::from_secs(0);
+}
+
 fn main() {
     let args = Args::parse();
 
     let directory = args.directory;
-    let connect_code = args.connect_code;
+    let connect_codes: Vec<&str> = args.connect_code.split(",").collect();
 
     let files = fs::read_dir(directory).expect("Files could not be read from given directory");
 
-    let mut num_games_with_connect_code: i32 = 0;
+    let mut total_game_time = Duration::from_secs(0);
+
     for file in files {
         if let Ok(file) = file {
             let file_name = file
@@ -62,15 +84,23 @@ fn main() {
             let game = peppi::game(&mut buffer, None, None);
 
             if let Ok(game) = game {
-                if does_game_feature_connect_code(&game, &connect_code) {
-                    num_games_with_connect_code += 1;
+                if does_game_feature_any_connect_code(&game, &connect_codes) {
+                    total_game_time += get_game_duration(&game);
                 }
             }
         }
     }
 
-    println!(
-        "Number of games featuring specified connect-code: {}",
-        num_games_with_connect_code
-    );
+    let secs = total_game_time.as_secs();
+    let mins = secs as f32 / 60.0;
+    let hours = mins / 60.0;
+    let days = hours / 24.0;
+    let weeks = days / 7.0;
+
+    println!("You've played {:?} seconds of Melee, that's...", secs);
+    println!("{:.2} minutes", mins);
+    println!("{:.2} hours", hours);
+    println!("{:.2} days", days);
+    println!("or {:.2} weeks!", weeks);
+    println!("Boy, that's a lot of Melee!")
 }
