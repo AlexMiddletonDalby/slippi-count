@@ -1,8 +1,11 @@
 use std::fs;
 use std::io;
+use std::sync::mpsc::channel;
+use std::thread::available_parallelism;
 use std::time::Duration;
 
 use clap::Parser;
+use threadpool::ThreadPool;
 
 use peppi::model::game::Game;
 use peppi::model::metadata::Player;
@@ -65,30 +68,45 @@ fn main() {
     let args = Args::parse();
 
     let directory = args.directory;
-    let connect_codes: Vec<&str> = args.connect_code.split(",").collect();
-
-    let files = fs::read_dir(directory).expect("Files could not be read from given directory");
+    let files = fs::read_dir(&directory).expect("Files could not be read from given directory");
 
     let mut total_game_time = Duration::from_secs(0);
 
+    let threadpool = ThreadPool::new(usize::from(available_parallelism().unwrap()));
+
+    let (sender, reciever) = channel();
     for file in files {
-        if let Ok(file) = file {
-            let file_name = file
-                .path()
-                .into_os_string()
-                .into_string()
-                .expect("Invalid path");
+        let sender = sender.clone();
+        let connect_code_arg = args.connect_code.clone();
 
-            let file = fs::File::open(file_name).expect("File could not be read");
-            let mut buffer = io::BufReader::new(file);
-            let game = peppi::game(&mut buffer, None, None);
+        threadpool.execute(move || {
+            let connect_codes: Vec<&str> = connect_code_arg.split(",").collect();
 
-            if let Ok(game) = game {
-                if does_game_feature_any_connect_code(&game, &connect_codes) {
-                    total_game_time += get_game_duration(&game);
+            if let Ok(file) = file {
+                let file_name = file
+                    .path()
+                    .into_os_string()
+                    .into_string()
+                    .unwrap_or("".to_string());
+
+                let file = fs::File::open(file_name).expect("File could not be read");
+                let mut buffer = io::BufReader::new(file);
+                let game = peppi::game(&mut buffer, None, None);
+
+                if let Ok(game) = game {
+                    if does_game_feature_any_connect_code(&game, &connect_codes) {
+                        sender
+                            .send(get_game_duration(&game).as_secs() as u32)
+                            .unwrap()
+                    }
                 }
             }
-        }
+        });
+    }
+    drop(sender);
+
+    for message in reciever.iter() {
+        total_game_time += Duration::from_secs(message as u64);
     }
 
     let secs = total_game_time.as_secs();
@@ -102,5 +120,5 @@ fn main() {
     println!("{:.2} hours", hours);
     println!("{:.2} days", days);
     println!("or {:.2} weeks!", weeks);
-    println!("Boy, that's a lot of Melee!")
+    println!("Boy, that's a lot of Melee!");
 }
